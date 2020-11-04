@@ -28,7 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog"
 	"k8s.io/kubernetes/pkg/volume"
@@ -130,14 +129,40 @@ func (p *rbdProvisioner) Provision(options controller.VolumeOptions) (*v1.Persis
 	// If use-pv-name flag not set, generate image name
 	if !p.usePVName {
 		// create random image name
-		image = fmt.Sprintf("kubernetes-dynamic-pvc-%s", uuid.NewUUID())
+		//image = fmt.Sprintf("kubernetes-dynamic-pvc-%s", uuid.NewUUID())
+		image = fmt.Sprintf("%s-%s",options.PVC.Namespace, options.PVC.Name)
 	}
-	rbd, sizeMB, err := p.rbdUtil.CreateImage(image, opts, options)
-	if err != nil {
-		klog.Errorf("rbd: create volume failed, err: %v", err)
-		return nil, err
+	//default using existed image
+	rbd := &v1.RBDPersistentVolumeSource{
+		CephMonitors: opts.monitors,
+		RBDImage:     image,
+		RBDPool:      opts.pool,
+		FSType:       opts.fsType,
 	}
-	klog.Infof("successfully created rbd image %q", image)
+	capacity := options.PVC.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
+	volSizeBytes := capacity.Value()
+	// convert to MB that rbd defaults on
+	sizeMB := int(util.RoundUpSize(volSizeBytes, 1024*1024))
+	if sizeMB <= 0 {
+		errText := "invalid storage '%s' requested for RBD provisioner, it must greater than zero"
+		klog.Errorf(errText, capacity.String())
+		return nil, fmt.Errorf(errText,capacity.String())
+	}
+
+	if !p.rbdUtil.checkImageExistence(image, opts){
+		klog.Infof("image does not exist,creating...")
+		fmt.Println("image does not exist,creating...")
+		rbd, sizeMB, err = p.rbdUtil.CreateImage(image, opts, options)
+		if err != nil {
+			klog.Errorf("rbd: create volume failed, err: %v", err)
+			return nil, err
+		}
+		klog.Infof("successfully created rbd image %q", image)
+	}else{
+		klog.Infof("image already exists...")
+		fmt.Println("image already exists...")
+	}
+
 
 	rbd.SecretRef = new(v1.SecretReference)
 	rbd.SecretRef.Name = opts.userSecretName

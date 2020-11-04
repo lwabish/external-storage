@@ -151,6 +151,23 @@ func (u *RBDUtil) DeleteImage(image string, pOpts *rbdProvisionOptions) error {
 	return err
 }
 
+//
+func (u *RBDUtil) checkImageExistence(image string,pOpts *rbdProvisionOptions)bool{
+	mon := u.kernelRBDMonitorsOpt(pOpts.monitors)
+	args := []string{"ls", pOpts.pool, "--id", pOpts.adminID, "-m", mon, "--key=" + pOpts.adminSecret}
+	output, err := u.execCommand("rbd",args)
+	if err!=nil{
+		klog.Error(err)
+	}
+	images := strings.Split(string(output),"\n")
+	for _,v := range images{
+		if v==image{
+			return true
+		}
+	}
+	return false
+}
+
 func (u *RBDUtil) execCommand(command string, args []string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(u.timeout)*time.Second)
 	defer cancel()
